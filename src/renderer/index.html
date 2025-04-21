@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' './assets/marked.min.js'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src http://127.0.0.1:5111">
+    <title>Zenith Assistant</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <div class="container">
+        <header class="title-bar">
+            <div class="title-bar-drag-area">
+                 <span class="title">Zenith ✨</span>
+            </div>
+             <div class="window-controls">
+                 <button id="clear-chat-btn" title="Clear Chat">🧹</button>
+                 <button id="minimize-btn" title="Minimize">－</button>
+                 <button id="maximize-btn" title="Maximize">▢</button>
+                 <button id="close-btn" title="Close">✕</button>
+             </div>
+        </header>
+
+        <div class="chat-container" id="chat-container">
+            <!-- Messages load here -->
+        </div>
+
+        <div class="interaction-area">
+             <button id="stop-button" class="stop-button hidden" title="Stop Generation">⏹️ Stop</button>
+
+             <div class="input-wrapper">
+                 <!-- Placeholder will be updated by script.js -->
+                 <textarea id="query-input" placeholder="Ask Zenith anything..." rows="1"></textarea>
+                 <button id="send-button" title="Send">▲</button>
+             </div>
+             <div class="action-buttons">
+                 <button id="mic-button" title="Ask with Voice">🎤</button>
+                 <button id="webcam-button" title="Analyze Image">📸</button>
+             </div>
+        </div>
+
+        <div id="status-indicator" class="status-indicator"></div>
+
+         <!-- Hidden elements for webcam -->
+         <video id="webcam-video" playsinline style="display: none;"></video>
+         <canvas id="webcam-canvas" style="display: none;"></canvas>
+
+    </div>
+
+    <!-- Load Marked.js for Markdown rendering -->
+    <script src="./assets/marked.min.js"></script>
+    <!-- Load main renderer script -->
+    <script src="script.js"></script>
+</body>
+</html>

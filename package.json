@@ -1,0 +1,26 @@
+{
+    "name": "zenith-desktop-assistant",
+    "version": "1.2.0",
+    "description": "Zenith ✨: Your Desktop AI Assistant",
+    "main": "src/main.js",
+    "scripts": {
+      "start": "concurrently \"npm run start-python\" \"npm run start-electron\"",
+      "start-electron": "electron .",
+      "start-python": "cd backend && python app.py",
+      "package": "electron-builder" 
+    },
+    "keywords": [
+      "electron", "ai", "zenith", "gemini", "python", "voice", "assistant", "desktop"
+    ],
+    "author": "Your Name",
+    "license": "MIT",
+    "devDependencies": {
+      "concurrently": "^8.2.2",
+      "electron": "^29.1.0", 
+      "electron-builder": "^24.9.1"
+    },
+    "dependencies": {
+      "dotenv": "^16.4.5"
+       
+    }
+  }
