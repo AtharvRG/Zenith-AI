@@ -1,5 +1,8 @@
-# Zenith AI ✨ Desktop Assistant
+<p align="center">
+<img src="https://github.com/user-attachments/assets/d16716e3-4fae-40dc-bfc3-d8d0e6da31d0" width="550" title="hover text"/>
+</p>
 
+# Zenith AI ✨ Desktop Assistant 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![GitHub repo size](https://img.shields.io/github/repo-size/AtharvRG/Zenith-AI)](https://github.com/AtharvRG/Zenith-AI)
 
