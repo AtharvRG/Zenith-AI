@@ -1,7 +1,6 @@
 /**
- * Zenith Assistant - Renderer Process Script (script.js) V1.2.1
- * Handles UI, backend communication, chat history, commands (open), voice, webcam.
- * Includes console logs for clearChat debugging.
+ * Zenith Assistant - Renderer Process Script (script.js) V1.6.1
+ * Includes: Settings Panel, Themes, Auto-Send Toggle, Adv Search, Clipboard, Notes, Context, Code Copy, Backend Status, Fixes
  */
 
 // --- DOM Elements ---
@@ -9,685 +8,307 @@ const queryInput = document.getElementById('query-input');
 const sendButton = document.getElementById('send-button');
 const micButton = document.getElementById('mic-button');
 const webcamButton = document.getElementById('webcam-button');
+const clipboardButton = document.getElementById('clipboard-button');
 const chatContainer = document.getElementById('chat-container');
 const statusIndicator = document.getElementById('status-indicator');
+const connectionStatusDot = document.getElementById('connection-status');
 const minimizeBtn = document.getElementById('minimize-btn');
 const maximizeBtn = document.getElementById('maximize-btn');
 const closeBtn = document.getElementById('close-btn');
-const clearChatBtn = document.getElementById('clear-chat-btn'); // Ensure this selection happens
+const clearChatBtn = document.getElementById('clear-chat-btn');
 const stopButton = document.getElementById('stop-button');
 const videoElement = document.getElementById('webcam-video');
 const canvasElement = document.getElementById('webcam-canvas');
 const interactionArea = document.querySelector('.interaction-area');
+// Settings Panel Elements
+const settingsBtn = document.getElementById('settings-btn');
+const settingsPanel = document.getElementById('settings-panel');
+const settingsOverlay = document.getElementById('settings-overlay');
+const settingsCloseBtn = document.getElementById('settings-close-btn');
+const themeOptionBtns = document.querySelectorAll('.theme-options .theme-btn');
+const clearAppsBtn = document.getElementById('clear-apps-btn'); // Placeholder action button
+const autoSendToggle = document.getElementById('auto-send-toggle'); // Auto-send setting
 
 // --- Constants ---
 const PYTHON_BACKEND_URL = 'http://127.0.0.1:5111';
 const CHAT_HISTORY_KEY = 'zenithAssistantChatHistory';
+const THEME_STORAGE_KEY = 'zenith-theme';
+const AUTO_SEND_VOICE_KEY = 'zenith-autoSendVoice';
+const PING_INTERVAL = 5000; // ms
+const CONTEXT_MESSAGE_COUNT = 6; // Number of messages (3 user + 3 assistant) for context
 
 // --- State Variables ---
-let isListening = false;                // Microphone active?
-let isGenerating = false;               // AI processing/responding?
-let isWebcamActive = false;             // Webcam stream active?
-let currentWebcamStream = null;         // MediaStream object for webcam
-let currentAssistantMessageElement = null; // DOM element being streamed into
-let chatHistory = [];                   // Array of message objects
-let abortController = null;             // For aborting fetch requests
-let awaitingAppPathFor = null;          // Holds name of app needing path input
+let isListening = false;
+let isGenerating = false;
+let isWebcamActive = false;
+let currentWebcamStream = null;
+let currentAssistantMessageElement = null; // Holds the DOM element being streamed into
+let chatHistory = [];
+let abortController = null;
+let awaitingAppPathFor = null; // Holds name of app needing path input
+let backendConnected = false;
+let pingIntervalId = null;
+let autoSendVoiceInput = true; // Default value, loaded from storage
 
 // --- Initialization ---
 document.addEventListener('DOMContentLoaded', () => {
-    console.log("DOM Content Loaded. Initializing script..."); // DEBUG
+    console.log("Zenith UI Initializing...");
+    loadAndApplyTheme(); // Load theme first
+    loadSettings();      // Load other preferences
     setupEventListeners();
-    loadChatHistory();
-    renderChatHistory();
-    autoResizeTextarea.call(queryInput);
-
-    // Configure Marked library for Markdown rendering
-    if (typeof marked !== 'undefined') {
-        marked.setOptions({
-            breaks: true, // Convert single line breaks to <br>
-            gfm: true,    // Use GitHub Flavored Markdown
-        });
-    } else {
-        console.error("Marked library not loaded. Markdown rendering will be disabled.");
-    }
-    console.log("Initialization complete."); // DEBUG
+    loadChatHistory();   // Load past messages
+    renderChatHistory(); // Display loaded history or initial message
+    autoResizeTextarea.call(queryInput); // Adjust input size
+    configureMarked();   // Setup Markdown library
+    startBackendPing();  // Start monitoring backend connection
+    updateActiveThemeButton(); // Ensure correct theme button is highlighted
 });
 
-// Handle window ready signal from main process for entry animation
+// --- Electron Window Ready Signal Handler ---
 window.electronAPI.onWindowReady(() => {
-    console.log("Window Ready signal received."); // DEBUG
-    document.body.classList.add('loaded');
-    // Focus input slightly after animation starts
-    setTimeout(() => queryInput.focus(), 100);
+    document.body.classList.add('loaded'); // Trigger entry animation
+    setTimeout(() => queryInput?.focus(), 150); // Focus input after animation settles, check if exists
 });
+
+// --- Configure Marked.js ---
+function configureMarked() {
+    if (typeof marked !== 'undefined') {
+        marked.setOptions({ breaks: true, gfm: true });
+        console.log("Marked.js configured.");
+    } else { console.error("Marked library failed to load."); }
+}
 
 // --- Event Listeners Setup ---
 function setupEventListeners() {
-    console.log("Setting up event listeners..."); // DEBUG
-    // Window Controls
-    // Use optional chaining ?. in case elements aren't found immediately
     minimizeBtn?.addEventListener('click', () => window.electronAPI.minimizeApp());
     maximizeBtn?.addEventListener('click', () => window.electronAPI.maximizeApp());
     closeBtn?.addEventListener('click', () => window.electronAPI.closeApp());
-
-    // **DEBUGGING CLEAR CHAT BUTTON**
-    console.log("Attempting to select clear chat button with ID 'clear-chat-btn':", document.getElementById('clear-chat-btn')); // DEBUG Check selection
-    if (clearChatBtn) { // Check if the element was found before adding listener
-        clearChatBtn.addEventListener('click', clearChat);
-        console.log("Event listener ADDED for clearChatBtn."); // DEBUG Confirm listener added
-    } else {
-        console.error("CRITICAL: Could not find clear chat button (ID: clear-chat-btn) in the DOM!"); // DEBUG Error if not found
-    }
-
-    // Input & Actions
-    queryInput?.addEventListener('input', autoResizeTextarea); // Auto-resize on type
-    queryInput?.addEventListener('keypress', handleInputKeypress); // Handle Enter key
-    sendButton?.addEventListener('click', handleSendQuery); // Send button click
-    micButton?.addEventListener('click', handleMicToggle); // Mic button click
-    webcamButton?.addEventListener('click', handleWebcamToggle); // Webcam button click
-    stopButton?.addEventListener('click', handleStopGeneration); // Stop generation button click
-    console.log("Event listeners setup finished."); // DEBUG
+    clearChatBtn?.addEventListener('click', clearChat);
+    queryInput?.addEventListener('input', autoResizeTextarea);
+    queryInput?.addEventListener('keypress', handleInputKeypress);
+    sendButton?.addEventListener('click', handleSendQuery);
+    micButton?.addEventListener('click', handleMicToggle);
+    webcamButton?.addEventListener('click', handleWebcamToggle);
+    clipboardButton?.addEventListener('click', handleClipboardRead);
+    stopButton?.addEventListener('click', handleStopGeneration);
+    settingsBtn?.addEventListener('click', toggleSettingsPanel);
+    settingsCloseBtn?.addEventListener('click', toggleSettingsPanel);
+    settingsOverlay?.addEventListener('click', toggleSettingsPanel);
+    themeOptionBtns.forEach(btn => btn.addEventListener('click', handleThemeButtonClick));
+    autoSendToggle?.addEventListener('change', handleAutoSendToggleChange);
+    clearAppsBtn?.addEventListener('click', handleClearKnownApps);
+    chatContainer.addEventListener('click', (event) => { if (event.target?.classList.contains('copy-code-btn')) handleCodeCopy(event.target); });
+    console.log("UI Event listeners attached.");
 }
+
+// --- Backend Connection Check ---
+async function pingBackend() {
+    try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 1500); // 1.5s timeout
+        const response = await fetch(`${PYTHON_BACKEND_URL}/ping`, { signal: controller.signal });
+        clearTimeout(timeoutId);
+        if (response.ok) {
+            const data = await response.json();
+            if (data.status === 'ok' && !backendConnected) { console.log("Backend connection established."); backendConnected = true; updateConnectionStatusUI(true); }
+            else if (response.ok && backendConnected) { backendConnected = true; updateConnectionStatusUI(true); } // Still connected
+        } else { throw new Error(`Ping fail: ${response.status}`); }
+    } catch (error) {
+        if (error.name !== 'AbortError' && backendConnected) { console.warn("Backend connection lost.", error.message); backendConnected = false; updateConnectionStatusUI(false); }
+        else if (!backendConnected) { backendConnected = false; updateConnectionStatusUI(false); } // Ensure UI reflects disconnected
+    }
+}
+function startBackendPing() { pingBackend(); if(pingIntervalId) clearInterval(pingIntervalId); pingIntervalId = setInterval(pingBackend, PING_INTERVAL); }
+function updateConnectionStatusUI(isConnected) {
+    if(connectionStatusDot) { connectionStatusDot.classList.toggle('connected',isConnected); connectionStatusDot.classList.toggle('disconnected',!isConnected); connectionStatusDot.title = isConnected ? "Backend Connected" : "Backend Disconnected"; }
+    // Refresh input states based on connection status
+    setGeneratingState(isGenerating, awaitingAppPathFor);
+}
+
+// --- Settings Panel ---
+function toggleSettingsPanel() { const isVisible = settingsPanel.classList.contains('visible'); if (!isVisible) updateActiveThemeButton(); settingsPanel.classList.toggle('visible'); settingsOverlay.classList.toggle('visible'); }
+
+// --- Theme Management ---
+function handleThemeButtonClick(event) { const theme = event.target.getAttribute('data-theme'); applyTheme(theme); updateActiveThemeButton(theme); }
+function applyTheme(themeName = 'glass') { console.log(`Applying theme: ${themeName}`); document.documentElement.setAttribute('data-theme', themeName); try{localStorage.setItem(THEME_STORAGE_KEY, themeName);}catch(e){console.error("Save theme fail:", e);} }
+function loadAndApplyTheme() { let theme = 'glass'; try{theme=localStorage.getItem(THEME_STORAGE_KEY) || 'glass';}catch(e){} applyTheme(theme); }
+function updateActiveThemeButton(activeTheme = null) { const theme = activeTheme || document.documentElement.getAttribute('data-theme') || 'glass'; themeOptionBtns.forEach(btn => { btn.classList.toggle('active', btn.getAttribute('data-theme') === theme); }); }
+
+// --- Settings Load/Save ---
+function loadSettings() { try{ const saved = localStorage.getItem(AUTO_SEND_VOICE_KEY); autoSendVoiceInput = saved !== null ? (saved === 'true') : true; }catch(e){ autoSendVoiceInput=true; } if(autoSendToggle) autoSendToggle.checked = autoSendVoiceInput; console.log(`Settings loaded: Auto-send=${autoSendVoiceInput}`); }
+function handleAutoSendToggleChange(event) { autoSendVoiceInput = event.target.checked; console.log(`Auto-send voice set to: ${autoSendVoiceInput}`); try{ localStorage.setItem(AUTO_SEND_VOICE_KEY, autoSendVoiceInput); }catch(e){ console.error("Save auto-send fail:", e); } }
+function handleClearKnownApps() { console.warn("Clear Known Apps - Placeholder."); showStatus("Clear Apps N/A", 3000); toggleSettingsPanel(); }
+
 
 // --- Core UI Functions ---
-function autoResizeTextarea() {
-    this.style.height = 'auto'; // Temporarily shrink to get correct scrollHeight
-    const maxHeight = 120; // Max height in pixels (matches CSS)
-    // Set height, but clamp it to maxHeight
-    this.style.height = Math.min(this.scrollHeight, maxHeight) + 'px';
-    // Check if user is near the bottom, if so, scroll chat down
-    const isScrolledNearBottom = chatContainer.scrollHeight - chatContainer.clientHeight <= chatContainer.scrollTop + 50;
-    if (isScrolledNearBottom) {
-        scrollToBottom();
-    }
-}
-function handleInputKeypress(event) {
-    // Send query if Enter is pressed WITHOUT the Shift key
-    if (event.key === 'Enter' && !event.shiftKey) {
-        event.preventDefault(); // Prevent default newline insertion
-        handleSendQuery();
-    }
-}
-function scrollToBottom() {
-    chatContainer.scrollTop = chatContainer.scrollHeight;
-}
-function showStatus(message, duration = 3000) {
-    statusIndicator.textContent = message;
-    statusIndicator.classList.add('show');
-    // Clear any existing timeout to prevent overlapping messages
-    clearTimeout(statusIndicator.timer);
-    // Set a new timeout to hide the message
-    statusIndicator.timer = setTimeout(() => {
-        statusIndicator.classList.remove('show');
-    }, duration);
-}
-
-// Update UI element states based on processing or waiting for input
+function autoResizeTextarea(){ this.style.height='auto'; this.style.height=Math.min(this.scrollHeight, 120)+'px'; if(chatContainer.scrollHeight-chatContainer.clientHeight<=chatContainer.scrollTop+60) scrollToBottom(); }
+function handleInputKeypress(e){ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); handleSendQuery(); }}
+function scrollToBottom(){ chatContainer.scrollTo({ top: chatContainer.scrollHeight, behavior: 'smooth' }); } // Smooth scroll
+function showStatus(m, d=3000){ statusIndicator.textContent=m; statusIndicator.classList.add('show'); clearTimeout(statusIndicator.timer); statusIndicator.timer=setTimeout(()=>statusIndicator.classList.remove('show'), d); }
 function setGeneratingState(generating, isAwaitingInput = false) {
-    const trulyGenerating = generating && !isAwaitingInput;
-    isGenerating = trulyGenerating; // Update global state
-    stopButton.classList.toggle('hidden', !trulyGenerating); // Show stop only if generating
-
-    const disableAllInputs = generating || isAwaitingInput;
-    queryInput.disabled = disableAllInputs;
-    sendButton.disabled = disableAllInputs;
-    micButton.disabled = disableAllInputs;
-    webcamButton.disabled = disableAllInputs;
-
-    interactionArea.classList.toggle('generating', trulyGenerating); // CSS cue for generating
-    interactionArea.classList.toggle('awaiting-input', isAwaitingInput); // CSS cue for awaiting path
-
-    // Restore placeholder only when exiting awaiting state
-    if (!isAwaitingInput) {
-        queryInput.placeholder = "Ask Zenith anything...";
-    }
+    const trulyGenerating = generating && !isAwaitingInput; isGenerating = trulyGenerating;
+    stopButton.classList.toggle('hidden', !trulyGenerating);
+    const disableUI = generating || isAwaitingInput || !backendConnected; // Determine overall disabled state
+    // Set disabled property on all interactive elements
+    queryInput.disabled = disableUI; sendButton.disabled = disableUI; micButton.disabled = disableUI; webcamButton.disabled = disableUI; clipboardButton.disabled = disableUI;
+    // Apply CSS classes for visual feedback
+    interactionArea.classList.toggle('generating', trulyGenerating); interactionArea.classList.toggle('awaiting-input', isAwaitingInput);
+    // Update placeholder text dynamically
+    if (!isAwaitingInput) queryInput.placeholder = backendConnected ? "Ask Zenith anything..." : "Connecting...";
 }
 
-// --- Chat History Management ---
-function loadChatHistory() {
-    const savedHistory = localStorage.getItem(CHAT_HISTORY_KEY);
-    if (savedHistory) {
-        try {
-            chatHistory = JSON.parse(savedHistory);
-            console.log(`Loaded ${chatHistory.length} messages from history (Key: ${CHAT_HISTORY_KEY}).`);
-        } catch (e) {
-            console.error("Failed to parse chat history from localStorage:", e);
-            chatHistory = []; // Reset if data is corrupted
-            localStorage.removeItem(CHAT_HISTORY_KEY); // Clear corrupted data
-        }
-    } else {
-        chatHistory = []; // Start fresh if no history found
-    }
-    // Add initial Zenith greeting message if the history is empty
-     if (chatHistory.length === 0) {
-        // Use the new Zenith branding in the greeting
-        chatHistory.push({ sender: 'assistant', content: 'Hello! I am Zenith ✨. How can I assist you today?', type: 'text'});
-        saveChatHistory(); // Save the initial greeting
-     }
-}
-function saveChatHistory() {
-    try {
-        localStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify(chatHistory));
-    } catch (e) {
-        console.error("Failed to save chat history to localStorage:", e);
-         showStatus("Error saving chat history.", 4000);
-    }
-}
-function addMessageToHistory(sender, content, type = 'text', imageUrl = null) {
-    const message = { sender, content, type };
-    // Include image URL if it's an image message
-    if (type === 'image' && imageUrl) {
-        message.imageUrl = imageUrl; // Store data URI or actual URL
-    }
-    chatHistory.push(message);
-    saveChatHistory(); // Persist after every addition
-    return message; // Return the added message object
-}
-function renderChatHistory() {
-    chatContainer.innerHTML = ''; // Clear existing messages
-    chatHistory.forEach(msg => {
-        renderMessage(msg.sender, msg.content, msg.imageUrl, msg.type === 'error', false, msg.type);
-    });
-    scrollToBottom();
-}
-
-// --- Clear Chat Function (with Debugging) ---
-function clearChat() {
-    console.log("clearChat function called."); // DEBUG
-    chatHistory = []; // Clear in-memory array
-    console.log("In-memory chatHistory array cleared."); // DEBUG
-
-    // Add the branded greeting back after clearing
-    // Note: addMessageToHistory also calls saveChatHistory implicitly
-    addMessageToHistory('assistant', 'Chat cleared. I am Zenith ✨, ready for your next question!', 'text');
-    console.log("Cleared greeting added to history (and saved)."); // DEBUG
-
-    renderChatHistory(); // Re-render the chat (now just shows the greeting)
-    console.log("Chat re-rendered from history."); // DEBUG
-
-    queryInput.value = ''; // Clear input field
-    autoResizeTextarea.call(queryInput); // Reset input height
-    showStatus("Chat cleared", 2000); // User feedback
-
-    // Ensure awaiting state is cleared if chat is cleared while waiting
-    if (awaitingAppPathFor) {
-        console.log("Clearing 'awaitingAppPathFor' state."); // DEBUG
-        awaitingAppPathFor = null;
-        setGeneratingState(false, false); // Exit awaiting state fully
-    }
-    console.log("clearChat function finished."); // DEBUG
-}
-
+// --- Chat History ---
+function loadChatHistory() { try{ const s=localStorage.getItem(CHAT_HISTORY_KEY); if(s) chatHistory=JSON.parse(s); console.log(`Loaded ${chatHistory.length} history.`); } catch(e){ console.error("History load err:",e); chatHistory=[]; localStorage.removeItem(CHAT_HISTORY_KEY); } if(chatHistory.length === 0) addMessageToHistory('assistant', 'Hello! I am Zenith ✨. How can I help you today?'); }
+function saveChatHistory() { try{ localStorage.setItem(CHAT_HISTORY_KEY,JSON.stringify(chatHistory)); } catch(e){ console.error("Hist save err:",e); showStatus("Err saving hist", 4000); }}
+function addMessageToHistory(sender, content, type = 'text', imageUrl = null) { const message={sender,content,type}; if(type==='image'&&imageUrl) message.imageUrl=imageUrl; chatHistory.push(message); saveChatHistory(); return message; }
+function renderChatHistory() { chatContainer.innerHTML=''; chatHistory.forEach(msg=>renderMessage(msg.sender, msg.content, msg.imageUrl, msg.type==='error')); scrollToBottom(); }
+function clearChat() { chatHistory=[]; addMessageToHistory('assistant', 'Chat cleared. Ready for your next question!'); renderChatHistory(); queryInput.value=''; autoResizeTextarea.call(queryInput); showStatus("Chat cleared"); if(awaitingAppPathFor){ awaitingAppPathFor=null; setGeneratingState(false,false); } }
 
 // --- Message Rendering ---
-function renderMessage(sender, content, imageUrl = null, isError = false, isThinking = false, type = 'text') {
-    const messageElement = document.createElement('div');
-    messageElement.classList.add('message', sender); // Apply 'user' or 'assistant' class
-
-    // Add special classes based on message state/type
-    if (isError || type === 'error') messageElement.classList.add('error');
-    if (isThinking) messageElement.classList.add('thinking');
-
-    const span = document.createElement('span'); // Element to hold text content
-
-    // Render content: Use Marked for Markdown, otherwise plain text
-    if (!isError && !isThinking && type === 'text' && typeof marked !== 'undefined') {
-        try {
-            span.innerHTML = marked.parse(content); // Parse and render Markdown
-        } catch (e) {
-             console.error("Markdown parsing error:", e);
-             span.textContent = content; // Fallback to plain text on error
-        }
-    } else {
-        span.textContent = content; // Use plain text for errors, thinking states, or if Marked fails
-    }
+function renderMessage(sender, content, imageUrl = null, isError = false) {
+    const messageElement = document.createElement('div'); messageElement.classList.add('message', sender); if (isError) messageElement.classList.add('error');
+    const span = document.createElement('span');
+    // Only parse Markdown for assistant messages that aren't errors
+    if (sender === 'assistant' && !isError && typeof marked !== 'undefined') { try{ span.innerHTML=marked.parse(content); } catch(e){ console.error("Markdown error:", e); span.textContent=content; } }
+    else { span.textContent=content; } // Render user messages & errors as plain text
     messageElement.appendChild(span);
-
-    // If an image URL is provided, create and append an image element
-    if (imageUrl) {
-        const img = document.createElement('img');
-        img.src = imageUrl;
-        img.alt = sender === 'user' ? "User Upload" : "Image provided by Zenith"; // Accessible alt text
-        messageElement.appendChild(img);
-    }
-
-    chatContainer.appendChild(messageElement); // Add the new message to the chat
-    scrollToBottom(); // Ensure the latest message is visible
-    return messageElement; // Return the created element for potential updates (streaming)
+    if (imageUrl) { const img=document.createElement('img'); img.src=imageUrl; img.alt="Image content"; messageElement.appendChild(img); }
+    chatContainer.appendChild(messageElement); // Add message to DOM
+    // Add Copy Buttons *after* rendering Markdown and appending to DOM
+    span.querySelectorAll('pre').forEach(pre => { if(!pre.querySelector('.copy-code-btn')){ const btn=document.createElement('button'); btn.textContent='Copy'; btn.className='copy-code-btn'; btn.title='Copy code snippet'; pre.style.position='relative'; pre.appendChild(btn); }});
+    scrollToBottom(); return messageElement;
 }
+function handleCodeCopy(button) { const pre=button.closest('pre'); const code=pre?.querySelector('code'); if(code){ navigator.clipboard.writeText(code.textContent).then(()=>{ button.textContent='Copied!'; setTimeout(()=>button.textContent='Copy', 1500); }).catch(err=>{ console.error('Copy fail:',err); showStatus("Copy failed", 2000); }); } }
 
-
-// --- Unified Send Button Handler ---
+// --- Unified Send Handler ---
 function handleSendQuery() {
     const userInput = queryInput.value.trim();
-    if (!userInput) return; // Do nothing if input is empty
+    if (!userInput || !backendConnected) { showStatus(backendConnected ? "Please type a message." : "Backend not connected.", 2000); return; }
+    const currentAwaitingApp = awaitingAppPathFor;
+    // Clear input AFTER processing, not before, especially for auto-send case.
+    // queryInput.value = '';
+    // autoResizeTextarea.call(queryInput);
+    queryInput.focus(); // Keep focus
 
-    const currentAwaitingApp = awaitingAppPathFor; // Check if waiting BEFORE clearing input
-
-    queryInput.value = '';
-    autoResizeTextarea.call(queryInput);
-    queryInput.focus();
-
-    // --- Case 1: User is providing an application path ---
-    if (currentAwaitingApp) {
-        console.log(`Path provided for '${currentAwaitingApp}': ${userInput}`);
-        // Display user input (as path)
-        renderMessage('user', `Path for ${currentAwaitingApp}: ${userInput}`, null, false, false, 'text');
-        addMessageToHistory('user', `Provided path for ${currentAwaitingApp}: ${userInput}`, 'text');
-        // Send path to backend
+    if (currentAwaitingApp) { // Sending app path
+        renderMessage('user', `Path for ${currentAwaitingApp}:\n\`${userInput}\``);
+        addMessageToHistory('user', `Provided path for ${currentAwaitingApp}: ${userInput}`);
+        queryInput.value = ''; autoResizeTextarea.call(queryInput); // Clear *after* processing
         sendAppPathToBackend(currentAwaitingApp, userInput);
-        // Reset state: no longer awaiting path
-        awaitingAppPathFor = null;
-        // Placeholder reset happens in setGeneratingState
-        setGeneratingState(false, false); // Exit awaiting state fully
-
-    }
-    // --- Case 2: User is sending a normal query or command ---
-    else if (!isGenerating && !isListening) { // Prevent sending while busy
-        addMessageToHistory('user', userInput, 'text');
-        renderMessage('user', userInput, null, false, false, 'text');
-        processPotentialCommandOrQuery(userInput); // Process it (command or Gemini)
+        awaitingAppPathFor = null; setGeneratingState(false, false);
+    } else if (!isGenerating && !isListening) { // Sending normal query/command
+        addMessageToHistory('user', userInput); renderMessage('user', userInput);
+        queryInput.value = ''; autoResizeTextarea.call(queryInput); // Clear *after* processing
+        processQueryOrCommand(userInput, false);
     }
 }
 
-// --- Processes Input: Checks for Commands or Sends to Gemini ---
-async function processPotentialCommandOrQuery(query) {
-    setGeneratingState(true, false); // Enter processing state
-    abortController = new AbortController(); // Allow aborting
 
-    // Create assistant placeholder message
-    currentAssistantMessageElement = renderMessage('assistant', '', null, false, true, 'text');
-    const contentSpan = currentAssistantMessageElement.querySelector('span');
-    if (contentSpan) contentSpan.textContent = ''; // Ensure empty
+// --- Process Query/Command/Clipboard ---
+async function processQueryOrCommand(inputText, isClipboard = false) {
+    setGeneratingState(true, false); abortController = new AbortController();
+    // Create placeholder message immediately
+    currentAssistantMessageElement = renderMessage('assistant', '', null, false); currentAssistantMessageElement.classList.add('thinking');
+    const contentSpan = currentAssistantMessageElement?.querySelector('span'); if(contentSpan) contentSpan.textContent='';
+    const endpoint = isClipboard ? '/process_clipboard' : '/ask_stream';
+    const payload = { history: chatHistory.slice(-CONTEXT_MESSAGE_COUNT) }; // Use constant for history length
+    if(isClipboard) { payload.text = inputText; } else { payload.query = inputText; }
 
     try {
-        // Send to backend; backend decides stream/JSON based on query
-        const response = await fetch(`${PYTHON_BACKEND_URL}/ask_stream`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query }),
-            signal: abortController.signal,
-        });
-
+        const response = await fetch(`${PYTHON_BACKEND_URL}${endpoint}`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload), signal:abortController.signal });
         const contentType = response.headers.get("content-type");
+        currentAssistantMessageElement?.classList.remove('thinking'); // Remove thinking animation
 
-        // --- Response Type: JSON (Backend Handled Command/Error) ---
-        if (contentType?.includes("application/json")) {
-            const data = await response.json();
-            console.log("Received JSON response:", data);
-
-            currentAssistantMessageElement?.classList.remove('thinking'); // Stop thinking animation
-
-            if (!response.ok) { throw new Error(data.error || `Request failed: ${response.status}`); }
-
-            // Process backend status
-            if (data.status === "handled" || data.status === "success") {
-                contentSpan.innerHTML = marked.parse(data.response);
-                addMessageToHistory('assistant', data.response, 'text');
-            } else if (data.status === "app_not_found") {
-                awaitingAppPathFor = data.app_name; // Enter awaiting state
-                setGeneratingState(false, true);    // Set UI to awaiting state
-                const message = data.error_hint ? `${data.error_hint}\n` : "";
-                const promptText = `${message}I don't know the path for **${data.app_name}**. Please enter the full path to its executable (e.g., C:\\Path\\To\\App.exe):`;
-                contentSpan.innerHTML = marked.parse(promptText);
-                addMessageToHistory('assistant', promptText, 'text'); // Save prompt asking for path
-                queryInput.placeholder = `Enter full path for ${data.app_name}...`; // Change placeholder
-                scrollToBottom();
-                // DO NOT nullify message element - it shows the prompt
-                // DO NOT exit generating state here - handled by setGeneratingState(false, true)
-                return; // Stop, wait for user to provide path
-            } else { // Other JSON errors
-                throw new Error(data.response || data.error || "Unknown error from backend");
-            }
-        }
-        // --- Response Type: Text Stream (Gemini Response) ---
-        else if (contentType?.includes("text/plain")) {
-            console.log("Received Streaming response from backend.");
-            currentAssistantMessageElement?.classList.remove('thinking');
-            await processStreamResponse(response.body, contentSpan); // Process the stream
-        }
-        // --- Response Type: Unexpected ---
-        else {
-            const responseText = await response.text(); // Read as text for debugging
-            throw new Error(`Unexpected response type: ${contentType}. Content: ${responseText.substring(0, 100)}...`);
-        }
-
-    } catch (error) {
-        // Use centralized handler for AbortError, Network errors etc.
-        handleFetchError(error, "processing query/command");
-    } finally {
-        // Reset state ONLY IF we are NOT currently waiting for user path input
-        if (!awaitingAppPathFor) {
-            setGeneratingState(false, false);
-            currentAssistantMessageElement = null;
-            abortController = null;
-        }
-    }
+        if (contentType?.includes("application/json")) { // Command handled by backend
+             const data = await response.json(); console.log("JSON Response:", data);
+             if(!response.ok) throw new Error(data.error || `Req Fail: ${response.status}`);
+             if(data.status === "handled" || data.status === "success") { if(contentSpan) contentSpan.innerHTML=marked.parse(data.response); addMessageToHistory('assistant', data.response); }
+             else if(data.status === "app_not_found") { awaitingAppPathFor = data.app_name; setGeneratingState(false, true); const msg=data.error_hint?`${data.error_hint}\n`:""; const pTxt=`${msg}Path for **${data.app_name}**?`; if(contentSpan) contentSpan.innerHTML=marked.parse(pTxt); addMessageToHistory('assistant', pTxt); queryInput.placeholder=`Enter full path for ${data.app_name}...`; return; }
+             else throw new Error(data.response || data.error || "Unknown JSON response");
+        } else if (contentType?.includes("text/plain")) { // Gemini stream response
+            await processStreamResponse(response.body, contentSpan);
+        } else { throw new Error(`Unexpected response type: ${contentType}`); }
+    } catch (error) { handleFetchError(error, isClipboard ? "clipboard proc" : "query/command");
+    } finally { if (!awaitingAppPathFor) { setGeneratingState(false, false); currentAssistantMessageElement = null; abortController = null; } }
 }
-
-// --- Helper to Process Text Stream from Backend ---
 async function processStreamResponse(responseBody, contentSpan) {
-    let accumulatedResponse = "";
-    const reader = responseBody.getReader();
-    const decoder = new TextDecoder();
-
-    try {
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break; // Exit loop when stream ends
-
-            const chunk = decoder.decode(value, { stream: true });
-            const lines = chunk.split('\n'); // Backend sends newline-delimited chunks or errors
-
-            for (const line of lines) {
-                 // Check for error prefix sent from backend
-                 if (line.startsWith("ERROR:")) {
-                    const errorMessage = line.substring(6).trim();
-                    console.error("Backend Streaming Error:", errorMessage);
-                    // Handle error visually
-                    currentAssistantMessageElement?.remove(); // Remove the thinking placeholder
-                    renderMessage('assistant', `Stream Error: ${errorMessage}`, null, true, false, 'error');
-                    addMessageToHistory('assistant', `Stream Error: ${errorMessage}`, 'error');
-                    currentAssistantMessageElement = null; // Clear reference
-                    throw new Error(errorMessage); // Propagate to stop processing
-                 } else if (line) { // Process valid text chunks (ignore empty lines from split)
-                    accumulatedResponse += line; // Append to the full response string
-                    // Update the content span with incrementally parsed Markdown
-                    // Check contentSpan exists before updating - could be removed by error
-                    if (contentSpan) {
-                        contentSpan.innerHTML = marked.parse(accumulatedResponse);
-                        scrollToBottom(); // Keep chat scrolled down
-                    }
-                 }
-            }
-        }
-        // After stream finishes successfully, save the complete response to history
-        // Check element still exists - it might have been removed by an error during stream
-        if (currentAssistantMessageElement) {
-             addMessageToHistory('assistant', accumulatedResponse, 'text');
-        }
-
-    } catch (streamError) {
-        console.error("Error while processing stream:", streamError);
-        // If error happened during decoding/reading, show generic message?
-        // Check if an error message was already rendered
-        if (currentAssistantMessageElement){ // If placeholder still somehow exists
-             currentAssistantMessageElement.remove();
-             renderMessage('assistant', `Stream processing error: ${streamError.message}`, null, true, false, 'error');
-             addMessageToHistory('assistant', `Stream processing error: ${streamError.message}`, 'error');
-        }
-        // Don't re-throw here, let the outer try/catch handle it via handleFetchError
-    }
+    let accumulated=""; const reader=responseBody.getReader(); const decoder=new TextDecoder();
+    try{ while(true){ const{done,value}=await reader.read(); if(done)break; const chunk=decoder.decode(value,{stream:true}); const lines=chunk.split('\n'); for(const line of lines){ if(line.startsWith("ERROR:")){ const eMsg=line.substring(6).trim(); console.error("Backend Stream Error:",eMsg); if(currentAssistantMessageElement)currentAssistantMessageElement.remove(); renderMessage('assistant',`Stream Error: ${eMsg}`,null,true); addMessageToHistory('assistant',`Stream Error: ${eMsg}`,'error'); currentAssistantMessageElement=null; throw new Error(eMsg); } else if(line){ accumulated+=line; if(contentSpan){contentSpan.innerHTML=marked.parse(accumulated); scrollToBottom();}}}} if(currentAssistantMessageElement)addMessageToHistory('assistant',accumulated);} catch(streamError){console.error("Stream Error:",streamError);throw streamError;}
 }
 
-
-// --- Sends the collected App Path to the Backend ---
+// --- Send App Path ---
 async function sendAppPathToBackend(appName, appPath) {
-    console.log(`Sending app path: Name=${appName}, Path=${appPath}`);
-    setGeneratingState(true, false); // Indicate processing
-    let tempMsg = renderMessage('assistant', `Saving path for ${appName}...`, null, false, true, 'text'); // Thinking indicator
-
-    try {
-        const response = await fetch(`${PYTHON_BACKEND_URL}/add_app`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ app_name: appName, app_path: appPath }),
-        });
-
-        const data = await response.json(); // Expect JSON response
-        tempMsg?.remove(); // Remove thinking indicator
-
-        if (!response.ok) {
-            throw new Error(data.error || `Failed to add app: ${response.status}`);
-        }
-
-        console.log("App path added via backend:", data.response);
-        renderMessage('assistant', data.response); // Show success message
-        addMessageToHistory('assistant', data.response, 'text');
-
-    } catch (error) {
-        console.error("Error sending app path:", error);
-        tempMsg?.remove(); // Remove thinking indicator
-        renderMessage('assistant', `Error saving path: ${error.message}`, null, true, false, 'error');
-        addMessageToHistory('assistant', `Error saving path: ${error.message}`, 'error');
-    } finally {
-        setGeneratingState(false, false); // Exit processing state
-        // Ensure awaiting state is cleared (should be already, but safe)
-        awaitingAppPathFor = null;
-    }
+    setGeneratingState(true,false); let tempMsg=renderMessage('assistant', `Saving path...`, null, false); tempMsg.classList.add('thinking');
+    try{ const response=await fetch(`${PYTHON_BACKEND_URL}/add_app`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({app_name:appName,app_path:appPath})}); tempMsg?.remove(); const data=await response.json(); if(!response.ok)throw new Error(data.error || `Add fail`); renderMessage('assistant',data.response); addMessageToHistory('assistant',data.response);}
+    catch(error){ tempMsg?.remove(); handleFetchError(error,"saving path");}
+    finally{ setGeneratingState(false,false); awaitingAppPathFor=null; }
 }
 
-// --- Centralized Fetch Error Handling ---
-function handleFetchError(error, context = "request") {
-    // Ignore abort errors as they are user-initiated
-    if (error.name === 'AbortError') {
-         console.log(`Fetch aborted by user during ${context}.`);
-         showStatus('Request stopped.', 2000);
-         // Add note to message if it exists and has content
-         if (currentAssistantMessageElement) {
-             const contentSpan = currentAssistantMessageElement.querySelector('span');
-             if (contentSpan && contentSpan.textContent?.trim()) {
-                 // Append stop note only if there was some content generated
-                 contentSpan.innerHTML += marked.parse("\n\n*(Request stopped)*");
-                 // Save the partial response with the stop note to history
-                 addMessageToHistory('assistant', contentSpan.textContent, 'text');
-             } else {
-                 // If the message element exists but has no text content, just remove it
-                 currentAssistantMessageElement.remove();
-             }
-         }
-    } else { // Handle other network/backend errors
-         console.error(`Error during ${context}:`, error);
-         currentAssistantMessageElement?.remove(); // Clean up placeholder if it exists
-         // Render a distinct error message in the chat
-         renderMessage('assistant', `Error: ${error.message}`, null, true, false, 'error');
-         // Add the error message to history
-         addMessageToHistory('assistant', `Error: ${error.message}`, 'error');
-    }
+// --- Fetch Error Handler ---
+function handleFetchError(error, context="request") {
+    if(error.name === 'AbortError'){ console.log(`Fetch aborted: ${context}`); showStatus('Stopped.', 2000); if(currentAssistantMessageElement){ const s=currentAssistantMessageElement.querySelector('span'); if(s?.textContent?.trim()){ s.innerHTML+=marked.parse("\n*(Stopped)*"); addMessageToHistory('assistant',s.textContent); }else{ currentAssistantMessageElement.remove(); }}}
+    else{ console.error(`Error ${context}:`, error); currentAssistantMessageElement?.remove(); renderMessage('assistant', `Error: ${error.message}`, null, true); addMessageToHistory('assistant', `Error: ${error.message}`, 'error'); }
 }
 
+// --- Clipboard Handler ---
+async function handleClipboardRead() {
+    if(isGenerating||isListening||awaitingAppPathFor||!backendConnected) return;
+    try { const text = await window.electronAPI.readClipboard(); if(!text?.trim()){showStatus("Clipboard empty.",2000); return;} renderMessage('user',`Clipboard Content:\n\`\`\`\n${text.substring(0,200)}${text.length > 200 ? '...' : ''}\n\`\`\``); addMessageToHistory('user', `Read clipboard:\n${text}`); processQueryOrCommand(text, true); } // Mark as clipboard
+    catch(e){ handleFetchError(e, "reading clipboard"); }
+}
 
-// --- Image Analysis Query ---
+// --- Image Analysis ---
 async function sendImageAnalysisQuery(query, imageDataURL) {
-    if (isGenerating || isListening || awaitingAppPathFor) return; // Prevent if busy/waiting
-
-    addMessageToHistory('user', query, 'image', imageDataURL);
-    renderMessage('user', query, imageDataURL, false, false, 'image');
-
-    setGeneratingState(true, false);
-    currentAssistantMessageElement = renderMessage('assistant', '', null, false, true, 'text');
-    abortController = new AbortController();
-
-    try {
-        const response = await fetch(`${PYTHON_BACKEND_URL}/analyze_image`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query, image_data: imageDataURL }),
-            signal: abortController.signal,
-        });
-
-        currentAssistantMessageElement?.classList.remove('thinking');
-        const data = await response.json(); // Expect JSON response for success/error
-
-        if (!response.ok) {
-            throw new Error(data.error || `Image analysis failed: ${response.status}`);
-        }
-
-        // Success: update placeholder and save history
-        if (currentAssistantMessageElement) {
-           currentAssistantMessageElement.querySelector('span').innerHTML = marked.parse(data.response);
-        } else { // Fallback if element somehow got removed
-           currentAssistantMessageElement = renderMessage('assistant', data.response);
-        }
-        addMessageToHistory('assistant', data.response, 'text');
-
-    } catch (error) {
-        handleFetchError(error, "image analysis"); // Use centralized handler
-    } finally {
-        // Ensure state is reset ONLY if not awaiting path input
-        if (!awaitingAppPathFor) {
-             setGeneratingState(false, false);
-             currentAssistantMessageElement = null;
-             abortController = null;
-        }
-    }
+    if(isGenerating||isListening||awaitingAppPathFor||!backendConnected) return;
+    addMessageToHistory('user',query,'image',imageDataURL); renderMessage('user',query,imageDataURL);
+    setGeneratingState(true,false); currentAssistantMessageElement=renderMessage('assistant','',null,false); currentAssistantMessageElement.classList.add('thinking'); abortController=new AbortController();
+    try { const payload = {query:query,image_data:imageDataURL /* history omitted */};
+        const response=await fetch(`${PYTHON_BACKEND_URL}/analyze_image`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload),signal:abortController.signal});
+        currentAssistantMessageElement?.classList.remove('thinking'); const data=await response.json(); if(!response.ok) throw new Error(data.error || `Image fail`);
+        const responseText = data.response || "Could not analyze image."; if(currentAssistantMessageElement) currentAssistantMessageElement.querySelector('span').innerHTML=marked.parse(responseText); else currentAssistantMessageElement = renderMessage('assistant', responseText); addMessageToHistory('assistant',responseText);
+    } catch(error){ handleFetchError(error, "image analysis");
+    } finally { if(!awaitingAppPathFor) { setGeneratingState(false, false); currentAssistantMessageElement=null; abortController=null; } }
 }
 
+// --- Stop Button ---
+function handleStopGeneration() { if(isGenerating && abortController) abortController.abort(); }
 
-// --- Stop Button Handler ---
-function handleStopGeneration() {
-     // Only attempt abort if actively generating and controller exists
-     if (isGenerating && abortController) {
-         console.log("Attempting to stop generation/analysis...");
-         abortController.abort(); // Trigger the abort signal
-         // State reset is handled in the fetch error/finally blocks
-     }
-}
-
-// --- Speech Recognition Handler ---
+// --- Speech Recognition Handler (FIXED for auto-send display) ---
 async function handleMicToggle() {
-    if (isGenerating || awaitingAppPathFor) return; // Prevent if busy or waiting for path
-    if (isListening) {
-        // Note: Backend currently listens for a fixed duration. Stopping early isn't implemented.
-        console.warn("Mic stop request ignored; backend listens for fixed duration.");
-        return;
-    }
-
-    // --- Start Listening ---
-    isListening = true;
-    micButton.classList.add('listening'); micButton.disabled = true;
-    disableOtherInputs(true); showStatus("Listening...", 5000); // Show for duration
-
-    try {
-        // Request transcription from the backend /listen endpoint
-        const response = await fetch(`${PYTHON_BACKEND_URL}/listen`, { method: 'POST' });
-
-        // Check HTTP status BEFORE trying to parse JSON
-        if (!response.ok) {
-            // Try to get specific error from backend JSON response
-            const errorData = await response.json().catch(() => ({ error: `Listen request failed: ${response.status}` }));
-            // Provide user-friendly messages for common backend issues
-            if (errorData.error?.includes("model unavailable")) throw new Error("Voice model unavailable on backend.");
-            else if (errorData.error?.includes("audio error")) throw new Error("Microphone/audio error on backend.");
-            // Generic fallback error
-            throw new Error(errorData.error || `Listen request failed: ${response.status}`);
-        }
-
-        // If response is OK, parse the JSON data
-        const data = await response.json();
-
-        // Process the received transcript
-        if (data.transcript?.trim()) {
-            console.log("Transcript received:", data.transcript);
-            queryInput.value = data.transcript; // Populate the input field
-            autoResizeTextarea.call(queryInput); // Adjust input height
-            handleSendQuery(); // Automatically send the transcript using the main handler
-        } else {
-            // Handle cases like no speech detected or backend error providing transcript
-            console.log("No speech detected or empty transcript returned.");
-             showStatus("No speech detected.", 2000); // User feedback
-        }
-
-    } catch (error) { // Catch errors from fetch or manual throws
-        console.error('Speech Error:', error);
-        // Display error in chat and history
-        renderMessage('assistant', `Speech Error: ${error.message}`, null, true, false, 'error');
-        addMessageToHistory('assistant', `Speech Error: ${error.message}`, 'error');
-    } finally {
-        // Always reset listening state and UI elements
-        isListening = false;
-        micButton.classList.remove('listening');
-        micButton.disabled = false; // Re-enable mic button
-        disableOtherInputs(false); // Re-enable other inputs
-        statusIndicator.classList.remove('show'); // Ensure "Listening..." message is hidden
-    }
+    if(isGenerating||awaitingAppPathFor||!backendConnected) return; if(isListening) return;
+    isListening=true; micButton.classList.add('listening'); micButton.disabled=true; disableOtherInputs(true); showStatus("Listening...", 5000);
+    try { const response=await fetch(`${PYTHON_BACKEND_URL}/listen`,{method:'POST'});
+        if(!response.ok){ const e=await response.json().catch(()=>({error:`Listen fail: ${response.status}`})); throw new Error(e.error); }
+        const data=await response.json();
+        const transcript = data.transcript?.trim();
+        if(transcript){
+            console.log("Transcript:", transcript);
+            queryInput.value = transcript; // <<< Set input value FIRST
+            autoResizeTextarea.call(queryInput); // Resize input
+            if(autoSendVoiceInput){
+                console.log("Auto-sending voice query...");
+                // Don't call handleSendQuery directly as it clears input too early
+                // Call the core processing function instead, passing the transcript
+                addMessageToHistory('user', transcript); // Add user msg to history
+                renderMessage('user', transcript);      // Display user msg visually
+                queryInput.value = '';                 // Clear input NOW, after display
+                autoResizeTextarea.call(queryInput);   // Resize empty input
+                processQueryOrCommand(transcript, false); // Process the transcript query
+            } else {
+                console.log("Auto-send off. Transcript in input.");
+                queryInput.focus(); // Focus input for manual send
+            }
+        } else { showStatus("No speech detected.", 2000); }
+    } catch(error){ handleFetchError(error, "speech recognition");
+    } finally { isListening=false; micButton.classList.remove('listening'); micButton.disabled=false; disableOtherInputs(false); statusIndicator.classList.remove('show'); }
 }
 
 
-// --- Webcam Handlers ---
-function handleWebcamToggle() {
-    if (isGenerating || isListening || awaitingAppPathFor) return; // Prevent if busy/waiting
-    if (isWebcamActive) captureAndSendImage();
-    else startWebcam();
-}
-async function startWebcam() {
-    if (isWebcamActive) return; // Already active
-    webcamButton.disabled = true; showStatus("Starting webcam...");
-    try {
-        // Request video stream from user's device
-        currentWebcamStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-        videoElement.srcObject = currentWebcamStream; // Assign stream to hidden video element
-        await videoElement.play(); // Wait for the video to start playing
-        // Update state and UI
-        isWebcamActive = true;
-        webcamButton.classList.add('active'); // Visual cue (e.g., turns red)
-        webcamButton.title = 'Capture & Analyze'; // Update tooltip
-        showStatus('Webcam active. Aim & click 📸 again to capture.', 4000); // Instruct user
-    } catch (err) { // Handle errors (e.g., permissions denied, no camera)
-        console.error("Webcam Error:", err);
-        // Display error in chat and history
-        renderMessage('assistant', `Webcam Error: ${err.message}`, null, true);
-        addMessageToHistory('assistant', `Webcam Error: ${err.message}`, 'error');
-        stopWebcam(false); // Ensure cleanup even on error
-    } finally {
-        webcamButton.disabled = false; // Re-enable button after attempt
-    }
-}
-function stopWebcam(resetButton = true) {
-    // Stop all tracks in the stream
-    if (currentWebcamStream) {
-        currentWebcamStream.getTracks().forEach(track => track.stop());
-    }
-    videoElement.srcObject = null; // Remove stream from video element
-    isWebcamActive = false; // Update state flag
-    currentWebcamStream = null; // Clear stream reference
-    // Reset button appearance if requested
-    if(resetButton) {
-        webcamButton.classList.remove('active');
-        webcamButton.title = 'Analyze Image';
-    }
-    statusIndicator.classList.remove('show'); // Hide any related status message
-}
-function captureAndSendImage() {
-    // Ensure webcam is active and ready
-    if (!isWebcamActive || !videoElement.srcObject || videoElement.readyState < videoElement.HAVE_METADATA) {
-        console.warn("Webcam not ready for capture.");
-        showStatus("Webcam not ready...", 2000);
-        return;
-    }
+// --- Webcam ---
+function handleWebcamToggle(){if(isGenerating||isListening||awaitingAppPathFor||!backendConnected)return; if(isWebcamActive)captureAndSendImage(); else startWebcam();}
+async function startWebcam(){if(isWebcamActive)return; webcamButton.disabled=true; showStatus("Starting webcam..."); try{currentWebcamStream=await navigator.mediaDevices.getUserMedia({video:true,audio:false}); videoElement.srcObject=currentWebcamStream; await videoElement.play(); isWebcamActive=true; webcamButton.classList.add('active'); webcamButton.title='Capture'; showStatus('Webcam active. Click 📸 again.', 4000);}catch(err){handleFetchError(err,"starting webcam");stopWebcam(false);} finally{webcamButton.disabled=false;}}
+function stopWebcam(reset=true){if(currentWebcamStream)currentWebcamStream.getTracks().forEach(t=>t.stop()); videoElement.srcObject=null; isWebcamActive=false; currentWebcamStream=null; if(reset){webcamButton.classList.remove('active');webcamButton.title='Analyze Image';} statusIndicator.classList.remove('show');}
+function captureAndSendImage(){if(!isWebcamActive||videoElement.readyState<videoElement.HAVE_METADATA)return; showStatus("Capturing..."); canvasElement.width=videoElement.videoWidth;canvasElement.height=videoElement.videoHeight; const ctx=canvasElement.getContext('2d');ctx.drawImage(videoElement,0,0,canvasElement.width,canvasElement.height); const imgData=canvasElement.toDataURL('image/jpeg',0.9); const q=queryInput.value.trim()||"Analyze this image"; stopWebcam(); sendImageAnalysisQuery(q,imgData);}
 
-    showStatus("Capturing..."); // Feedback during capture process
-
-    // Set canvas dimensions to match the video's natural dimensions
-    canvasElement.width = videoElement.videoWidth;
-    canvasElement.height = videoElement.videoHeight;
-    // Draw the current video frame onto the hidden canvas
-    const context = canvasElement.getContext('2d');
-    context.drawImage(videoElement, 0, 0, canvasElement.width, canvasElement.height);
-
-    // Convert canvas content to a Base64 JPEG data URL
-    const imageDataURL = canvasElement.toDataURL('image/jpeg', 0.90); // Adjust quality (0.0-1.0)
-
-    // Get any accompanying text query from the input field, or use a default
-    const userQuery = queryInput.value.trim() || "Analyze this image and solve any questions shown.";
-
-    stopWebcam(); // Stop the webcam stream immediately after capture
-
-    sendImageAnalysisQuery(userQuery, imageDataURL); // Send data to the backend
-}
-
-// --- Utility to Disable/Enable Inputs ---
-// Helper to disable/enable input elements other than the one actively used
-function disableOtherInputs(disabled) {
-     queryInput.disabled = disabled;
-     sendButton.disabled = disabled;
-     // Only disable mic/webcam if not the active initiator OR if inputs are being generally enabled
-     if (!isListening) micButton.disabled = disabled;
-     // Keep webcam enabled unless generally disabled (allow capture click)
-     // Update: Better to disable webcam button too when other actions are happening
-     webcamButton.disabled = disabled;
-
-    // Old logic (might allow stopping webcam when active):
-    // if (!isWebcamActive || !disabled) webcamButton.disabled = disabled;
-}
+// --- Utility Disable Inputs ---
+function disableOtherInputs(disabled) { queryInput.disabled=disabled; sendButton.disabled=disabled; micButton.disabled=disabled; webcamButton.disabled=disabled; clipboardButton.disabled=disabled;} // Ensure all relevant buttons covered

@@ -1,55 +1,126 @@
 <!DOCTYPE html>
-<html>
+<html lang="en" data-theme="glass"> <!-- Set default theme, JS will override from localStorage -->
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' './assets/marked.min.js'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src http://127.0.0.1:5111">
+    <!-- Content Security Policy: Defines allowed resources -->
+    <meta http-equiv="Content-Security-Policy" content="
+        default-src 'self';
+        script-src 'self' './assets/marked.min.js';
+        style-src 'self' 'unsafe-inline';
+        img-src 'self' data:;
+        connect-src http://127.0.0.1:5111;
+    ">
+    <!-- Note: 'unsafe-inline' for styles is needed for dynamic theme switching via CSS vars,
+         but review if it can be removed in the future if style injection method changes. -->
     <title>Zenith Assistant</title>
+    <!-- Link to the main stylesheet -->
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-
+    <!-- Main Application Container -->
     <div class="container">
+
+        <!-- Custom Title Bar -->
         <header class="title-bar">
+            <!-- Draggable Area -->
             <div class="title-bar-drag-area">
                  <span class="title">Zenith ✨</span>
+                 <!-- Backend Connection Status Indicator -->
+                 <span id="connection-status" class="connection-status disconnected" title="Backend Connection Status"></span>
             </div>
+             <!-- Window Control Buttons -->
              <div class="window-controls">
+                 <button id="settings-btn" title="Settings">⚙️</button>
                  <button id="clear-chat-btn" title="Clear Chat">🧹</button>
-                 <button id="minimize-btn" title="Minimize">－</button>
-                 <button id="maximize-btn" title="Maximize">▢</button>
+                 <button id="minimize-btn" title="Minimize">－</button> <!-- Use symbols for buttons -->
+                 <button id="maximize-btn" title="Maximize/Restore">▢</button>
                  <button id="close-btn" title="Close">✕</button>
              </div>
         </header>
 
+        <!-- Chat Message Display Area -->
         <div class="chat-container" id="chat-container">
-            <!-- Messages load here -->
+            <!-- Chat messages are dynamically added here -->
         </div>
 
+        <!-- User Input and Action Buttons Area -->
         <div class="interaction-area">
+             <!-- Stop Generation Button (visible when AI is processing) -->
              <button id="stop-button" class="stop-button hidden" title="Stop Generation">⏹️ Stop</button>
 
+             <!-- Input Field Wrapper -->
              <div class="input-wrapper">
-                 <!-- Placeholder will be updated by script.js -->
-                 <textarea id="query-input" placeholder="Ask Zenith anything..." rows="1"></textarea>
-                 <button id="send-button" title="Send">▲</button>
+                 <textarea id="query-input" placeholder="Connecting..." rows="1" disabled title="Type your message or command"></textarea>
+                 <button id="send-button" title="Send Message" disabled>▲</button>
              </div>
+
+             <!-- Action Buttons -->
              <div class="action-buttons">
-                 <button id="mic-button" title="Ask with Voice">🎤</button>
-                 <button id="webcam-button" title="Analyze Image">📸</button>
+                 <button id="mic-button" title="Ask with Voice" disabled>🎤</button>
+                 <button id="webcam-button" title="Analyze Image from Webcam" disabled>📸</button>
+                 <button id="clipboard-button" title="Process Clipboard Text" disabled>📋</button>
              </div>
         </div>
 
+        <!-- Temporary Status Indicator (e.g., "Listening...") -->
         <div id="status-indicator" class="status-indicator"></div>
 
-         <!-- Hidden elements for webcam -->
-         <video id="webcam-video" playsinline style="display: none;"></video>
-         <canvas id="webcam-canvas" style="display: none;"></canvas>
+        <!-- Hidden Elements for Webcam Capture -->
+        <video id="webcam-video" playsinline style="display: none;"></video>
+        <canvas id="webcam-canvas" style="display: none;"></canvas>
 
-    </div>
+        <!-- Settings Panel (Overlay and Panel itself) -->
+        <div id="settings-panel" class="settings-panel">
+             <div class="settings-header">
+                 <h3>Settings</h3>
+                 <button id="settings-close-btn" class="settings-close-btn" title="Close Settings">×</button>
+             </div>
+             <div class="settings-content">
+                 <!-- Theme Selection Section -->
+                 <fieldset>
+                     <legend>Appearance</legend>
+                     <div class="theme-options button-grid">
+                         <button data-theme="glass" class="theme-btn">Glass</button>
+                         <button data-theme="dark" class="theme-btn">Dark</button>
+                         <button data-theme="light" class="theme-btn">Light</button>
+                         <button data-theme="ocean" class="theme-btn">Ocean</button>
+                         <button data-theme="forest" class="theme-btn">Forest</button>
+                         <button data-theme="rose" class="theme-btn">Rose</button>
+                         <button data-theme="purple" class="theme-btn">Purple</button>
+                         <button data-theme="crimson" class="theme-btn">Crimson</button>
+                         <button data-theme="nord" class="theme-btn">Nord</button>
+                         <!-- Add more theme buttons here -->
+                     </div>
+                 </fieldset>
 
-    <!-- Load Marked.js for Markdown rendering -->
+                 <!-- Interaction Settings -->
+                 <fieldset>
+                     <legend>Interaction</legend>
+                     <div class="setting-item">
+                         <label for="auto-send-toggle">Auto-Send Voice Input:</label>
+                         <label class="switch" title="Automatically send transcribed voice input as a query">
+                             <input type="checkbox" id="auto-send-toggle">
+                             <span class="slider round"></span>
+                         </label>
+                     </div>
+                 </fieldset>
+
+                 <!-- Data Management Section -->
+                 <fieldset>
+                    <legend>Data</legend>
+                    <button id="clear-apps-btn" class="settings-action-btn" title="Feature not yet implemented. Clears saved application paths.">Clear Known Apps (N/A)</button>
+                    <!-- Future: Add button to open notes.txt folder? Needs main process help via IPC -->
+                </fieldset>
+
+             </div> <!-- End settings-content -->
+        </div> <!-- End settings-panel -->
+        <div id="settings-overlay" class="settings-overlay"></div> <!-- Click outside to close -->
+
+    </div> <!-- End .container -->
+
+    <!-- External Libraries (Place before main script) -->
     <script src="./assets/marked.min.js"></script>
-    <!-- Load main renderer script -->
+    <!-- Main Application Logic -->
     <script src="script.js"></script>
 </body>
 </html>

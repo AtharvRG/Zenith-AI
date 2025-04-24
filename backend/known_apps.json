@@ -1,1 +1,18 @@
-{}
+{
+    "notepad": "C:\\Windows\\System32\\notepad.exe",
+    "calculator": "C:\\Windows\\System32\\calc.exe",
+    "wordpad": "C:\\Program Files\\Windows NT\\Accessories\\wordpad.exe",
+    "explorer": "C:\\Windows\\explorer.exe",
+    "command prompt": "C:\\Windows\\System32\\cmd.exe",
+    "cmd": "C:\\Windows\\System32\\cmd.exe",
+    "powershell": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+    "task manager": "C:\\Windows\\System32\\taskmgr.exe",
+    "control panel": "C:\\Windows\\System32\\control.exe",
+    "paint": "C:\\Windows\\System32\\mspaint.exe",
+    "snipping tool": "C:\\Windows\\System32\\SnippingTool.exe",
+    "character map": "C:\\Windows\\System32\\charmap.exe",
+    "magnifier": "C:\\Windows\\System32\\magnify.exe",
+    "disk cleanup": "C:\\Windows\\System32\\cleanmgr.exe",
+    "disk management": "C:\\Windows\\System32\\diskmgmt.msc",
+    "vs code": "C:\\Users\\Atharv\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe"
+}
